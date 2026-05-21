@@ -52,35 +52,25 @@ Restart ComfyUI. The node appears as **One Node · Flux-2 Klein**.
 
 This node works with any Flux 2 Klein model officially released by Black Forest Labs. GGUF versions are not currently supported.
 
-You will need a diffusion model, a text encoder, and the VAE. Download links below.
+You will find all officially released Flux 2 Klein models on the [Black Forest Labs HuggingFace page](https://huggingface.co/collections/black-forest-labs/flux2). Pick the variant that fits your VRAM and use case. You will need a diffusion model, a matching text encoder, and the VAE.
 
-**Diffusion models** (place in `models/diffusion_models/`)
-- [flux-2 klein 9b distilled](https://huggingface.co/black-forest-labs/FLUX.2-klein-9B/resolve/main/flux-2-klein-9b.safetensors) - requires access request on HuggingFace
-- [flux-2 klein 9b fp8](https://huggingface.co/black-forest-labs/FLUX.2-klein-9b-fp8/resolve/main/flux-2-klein-9b-fp8.safetensors) - requires access request on HuggingFace
-- [flux-2 klein 9b kv](https://huggingface.co/black-forest-labs/FLUX.2-klein-9b-kv/resolve/main/flux-2-klein-9b-kv.safetensors) - requires access request on HuggingFace
-- [flux-2 klein 9b kv fp8](https://huggingface.co/black-forest-labs/FLUX.2-klein-9b-kv-fp8/resolve/main/flux-2-klein-9b-kv-fp8.safetensors) - requires access request on HuggingFace
-- [flux-2 klein 4b distilled](https://huggingface.co/black-forest-labs/FLUX.2-klein-4B/resolve/main/flux-2-klein-4b.safetensors)
-- [flux-2 klein 4b fp8](https://huggingface.co/black-forest-labs/FLUX.2-klein-4b-fp8/resolve/main/flux-2-klein-4b-fp8.safetensors)
+The Faceswap LoRA is required for the Faceswap mode. The BiRefNet model is optional, only needed for the Remove Background feature in PAINT mode.
 
 **Text encoder for 9b models** (place in `models/text_encoders/`)
-- [qwen_3_8b_fp8mixed](https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-9b/resolve/main/split_files/text_encoders/qwen_3_8b_fp8mixed.safetensors)
-- [qwen_3_8b_fp4mixed](https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-9b/resolve/main/split_files/text_encoders/qwen_3_8b_fp4mixed.safetensors)
+- [Download](https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-9b/tree/main/split_files/text_encoders)
 
 **Text encoder for 4b model** (place in `models/text_encoders/`)
-- [qwen_3_4b](https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-4b/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors)
-- [qwen_3_4b_fp4](https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-4b/resolve/main/split_files/text_encoders/qwen_3_4b_fp4_flux2.safetensors)
+- [Download](https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-4b/tree/main/split_files/text_encoders)
 
 **VAE** (place in `models/vae/`)
-- [flux2-vae](https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-9b/resolve/main/split_files/vae/flux2-vae.safetensors)
+- [Download](https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-9b/tree/main/split_files/vae)
 
 **Faceswap LoRA** (place in `models/loras/`)
-- [bfs head swap v1 (9b)](https://huggingface.co/Alissonerdx/BFS-Best-Face-Swap/resolve/main/bfs_head_v1_flux-klein_9b_step3500_rank128.safetensors)
-- [bfs head swap v1 (4b)](https://huggingface.co/Alissonerdx/BFS-Best-Face-Swap/resolve/main/bfs_head_v1_flux-klein_4b.safetensors)
+- [BFS Head Swap v1 (9b)](https://huggingface.co/Alissonerdx/BFS-Best-Face-Swap/blob/main/bfs_head_v1_flux-klein_9b_step3500_rank128.safetensors)
+- [BFS Head Swap v1 (4b)](https://huggingface.co/Alissonerdx/BFS-Best-Face-Swap/blob/main/bfs_head_v1_flux-klein_4b.safetensors)
 
 **Remove Background** (place in `models/background_removal/`)
-
-The node includes a built-in Remove Background tool powered by BiRefNet. To use it, download:
-- [birefnet](https://huggingface.co/Comfy-Org/BiRefNet/resolve/main/background_removal/birefnet.safetensors)
+- [Download](https://huggingface.co/Comfy-Org/BiRefNet/tree/main/background_removal)
 
 ---
 
