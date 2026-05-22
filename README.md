@@ -1,6 +1,6 @@
-# One Node · Flux-2 Klein
+# One Node · FLUX.2 [klein]
 
-A ComfyUI custom node that wraps the full Flux 2 Klein workflow into a single self-contained UI widget. No graph to build, no spaghetti wires to connect, just one powerful node with everything inside.
+A ComfyUI custom node that wraps the full FLUX.2 [klein] workflow into a single self-contained UI widget. No graph to build, no spaghetti wires to connect, just one powerful node with everything inside.
 
 > *One Node to rule them all, One Node to find them,*
 > *One Node to bring them all, and in ComfyUI bind them.*
@@ -44,15 +44,15 @@ You need one additional custom node for inpaint and outpaint modes:
 git clone https://github.com/lquesada/ComfyUI-Inpaint-CropAndStitch.git
 ```
 
-Restart ComfyUI. The node appears as **One Node · Flux-2 Klein**.
+Restart ComfyUI. The node appears as **One Node · FLUX.2 [klein]**.
 
 ---
 
 ## Models
 
-This node works with any Flux 2 Klein model officially released by Black Forest Labs. GGUF versions are not currently supported.
+This node works with any FLUX.2 [klein] model officially released by Black Forest Labs. GGUF versions are not currently supported.
 
-You will find all officially released Flux 2 Klein models on the [Black Forest Labs HuggingFace page](https://huggingface.co/collections/black-forest-labs/flux2). Pick the variant that fits your VRAM and use case. You will need a diffusion model, a matching text encoder, and the VAE.
+You will find all officially released FLUX.2 [klein] models on the [Black Forest Labs HuggingFace page](https://huggingface.co/collections/black-forest-labs/flux2). Pick the variant that fits your VRAM and use case. You will need a diffusion model, a matching text encoder, and the VAE.
 
 The Faceswap LoRA is required for the Faceswap mode. The BiRefNet model is optional, only needed for the Remove Background feature in PAINT mode.
 
@@ -72,9 +72,9 @@ The Faceswap LoRA is required for the Faceswap mode. The BiRefNet model is optio
 
 ---
 
-## License note on Flux 2 Klein 9B
+## License note on FLUX.2 [klein] 9B
 
-This node works with both the 4B and 9B variants of Flux 2 Klein. The 4B model is released under Apache 2.0 and can be used freely including commercially.
+This node works with both the 4B and 9B variants of FLUX.2 [klein]. The 4B model is released under Apache 2.0 and can be used freely including commercially.
 
 The 9B model is released under the **FLUX Non-Commercial License** by Black Forest Labs. This means you can use it for personal and research purposes, but commercial use is not permitted. If you use the 9B model, you are responsible for complying with that license.
 

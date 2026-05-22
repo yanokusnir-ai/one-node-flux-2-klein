@@ -816,6 +816,6 @@ class FluxKleinOneNode:
 
 
 NODE_CLASS_MAPPINGS = {"FluxKleinOneNode": FluxKleinOneNode}
-NODE_DISPLAY_NAME_MAPPINGS = {"FluxKleinOneNode": "One Node · Flux-2 Klein"}
+NODE_DISPLAY_NAME_MAPPINGS = {"FluxKleinOneNode": "One Node · FLUX.2 [klein]"}
 
 _migrate_meta_sidecars()
