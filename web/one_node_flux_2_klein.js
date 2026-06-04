@@ -3943,7 +3943,7 @@ app.registerExtension({
         padding:"3px 10px",flexWrap:"wrap",rowGap:"0",
       });
       const _skShortcuts=[
-        ["B","Brush"],["E","Eraser"],["R","Rect"],["C","Circle"],["M","Move/Scale"],
+        ["B","Brush"],["E","Eraser"],["R","Rect"],["C","Circle"],["V","Move/Scale"],
         ["Ctrl+Z","Undo"],["Space+drag","Pan"],["Scroll","Zoom"],
       ];
       _skShortcuts.forEach(([key,desc],idx)=>{
