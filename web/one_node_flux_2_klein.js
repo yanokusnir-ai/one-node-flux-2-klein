@@ -580,6 +580,9 @@ app.registerExtension({
           // Default ON at 1 MP = the existing behaviour, so existing users see no change.
           downscaleRef:   saved.downscaleRef!==undefined?saved.downscaleRef:true,
           downscaleRefMP: saved.downscaleRefMP!==undefined?saved.downscaleRefMP:1.0,
+          // UI layout: "classic" = wide prompt under the preview (default),
+          // "tall" = prompt in the left column so the preview gets full height.
+          layoutMode:   saved.layoutMode||"classic",
           previewUrl:   null,
         };
       }
@@ -610,6 +613,7 @@ app.registerExtension({
           i2iImage:S.i2iImage, i2iDenoise:S.i2iDenoise, i2iResizeLonger:S.i2iResizeLonger,
           userLoras:S.userLoras, soundEnabled, extLoaders:S.extLoaders,
           downscaleRef:S.downscaleRef, downscaleRefMP:S.downscaleRefMP,
+          layoutMode:S.layoutMode,
         });
       };
 
@@ -1261,6 +1265,30 @@ app.registerExtension({
       settingsBtn.onclick=e=>{e.stopPropagation();_refreshExtInputUI();openOverlay(settingsOverlay);};
       settClose.onclick=()=>closeOverlayFade(settingsOverlay);
 
+      // ── Layout toggle (classic wide-prompt ↔ tall preview) ────────────────
+      const layoutBtn=mk("button",{
+        background:"transparent",border:`1.5px solid ${C.borderH}`,
+        borderRadius:"6px",padding:"4px 8px",
+        cursor:"pointer",color:C.muted,
+        display:"flex",alignItems:"center",gap:"4px",
+        transition:"opacity .15s, border-color .15s, color .15s",outline:"none",
+      });
+      const _setLayoutBtnIcon=()=>{
+        // Icon hints the layout you'll switch TO; lime when "tall" is active.
+        const tall=S.layoutMode==="tall";
+        layoutBtn.title=tall?"Layout: tall preview (click for classic wide prompt)":"Layout: classic (click for tall preview)";
+        layoutBtn.innerHTML=`<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>`;
+        layoutBtn.style.color=tall?LIME:C.muted;
+        layoutBtn.style.borderColor=tall?LIME:C.borderH;
+      };
+      _setLayoutBtnIcon();
+      layoutBtn.onmouseenter=()=>{layoutBtn.style.borderColor=LIME;layoutBtn.style.color=LIME;};
+      layoutBtn.onmouseleave=()=>{_setLayoutBtnIcon();};
+      layoutBtn.onclick=()=>{
+        S.layoutMode=S.layoutMode==="tall"?"classic":"tall";
+        _applyLayout(S.layoutMode);_setLayoutBtnIcon();persist();
+      };
+
       // Fullscreen node button
       const fsNodeBtn=mk("button",{
         background:"transparent",border:`1.5px solid ${C.borderH}`,
@@ -1337,7 +1365,7 @@ app.registerExtension({
 
       const topBarLeft=mk("div",{display:"flex",gap:"3px",alignItems:"center",flexWrap:"nowrap"});
       const topBarRight=mk("div",{display:"flex",gap:"6px",alignItems:"center",flexShrink:"0"});
-      topBarRight.append(galleryBtn,tipsBtn,settingsBtn,fsNodeBtn);
+      topBarRight.append(galleryBtn,tipsBtn,settingsBtn,layoutBtn,fsNodeBtn);
       topBar.append(topBarLeft,topBarRight);
 
       // ── PILLS ─────────────────────────────────────────────────────────────
@@ -1388,7 +1416,21 @@ app.registerExtension({
       // ── MAIN ROW ─────────────────────────────────────────────────────────
       const mainRow=mk("div",{display:"flex",gap:"12px",alignItems:"stretch",flex:"1",minHeight:"0"});
       const leftPanel=mk("div",{display:"flex",flexDirection:"column",gap:"7px",
-        width:"300px",flexShrink:"0"});
+        width:"300px",flexShrink:"0",minHeight:"0",overflowY:"auto",overflowX:"hidden"});
+
+      // Switch prompt placement between the two layouts. promptWrap is defined
+      // further down but captured by closure; this only runs at assemble time / on toggle.
+      const _applyLayout=(mode)=>{
+        if(mode==="tall"){
+          // Prompt in the left column → preview (mainRow) takes the full height.
+          leftPanel.appendChild(promptWrap);
+          promptTA.style.height="94px"; // a little taller to use the column space
+        } else {
+          // Classic: wide prompt under the preview (original 80px height).
+          pad.appendChild(promptWrap);
+          promptTA.style.height="80px";
+        }
+      };
 
       // ── Node-local fullscreen overlay ────────────────────────────────────
       let _nodeFsOv=null;
@@ -9214,7 +9256,10 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
       // _galNeedsRefresh is set to true in showFinal so gallery auto-refreshes on next open
 
       // ── ASSEMBLE ─────────────────────────────────────────────────────────
-      pad.append(topBar,mainRow,promptWrap);
+      pad.append(topBar,mainRow);
+      // Layout mode places promptWrap either in the left column ("tall" → preview
+      // gets full height, good for portrait) or full-width under the preview ("classic").
+      _applyLayout(S.layoutMode);
       root.appendChild(helpOverlay);
       root.appendChild(settingsOverlay);
       root.appendChild(galleryOverlay);
