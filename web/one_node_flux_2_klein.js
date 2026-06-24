@@ -6418,9 +6418,13 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
           ulStr.addEventListener("pointerdown",(e)=>{
             armed=true;dragging=false;startX=e.clientX;pid=e.pointerId;
             startVal=_pf(ulStr.value); if(isNaN(startVal)) startVal=0;
-            // No preventDefault / capture here, so a plain click still focuses to type.
-            // The drag only kicks in past THRESHOLD, so the caret keeps working for clicks
-            // even while the field is already focused (lets you type then drag to adjust).
+            // Capture the pointer up front so every move/up is delivered even once the
+            // cursor leaves this 46px-wide box. Without it, pre-threshold pointermove
+            // only fires while over the field, so fast or edge-started drags exit the
+            // box before crossing THRESHOLD and the scrub silently no-ops (the "sometimes
+            // works" bug). Capture doesn't preventDefault, so a plain click still focuses
+            // the field for typing; the drag only kicks in past THRESHOLD.
+            try{ ulStr.setPointerCapture(pid); }catch(_){}
           });
           ulStr.addEventListener("pointermove",(e)=>{
             if(!armed) return;
@@ -6429,7 +6433,6 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
               if(Math.abs(dx)<THRESHOLD) return; // still within click tolerance
               dragging=true;
               if(document.activeElement===ulStr) ulStr.blur(); // leave edit mode when a drag begins
-              try{ ulStr.setPointerCapture(pid); }catch(_){}
             }
             let v=startVal+dx*STEP;
             v=Math.round(v*100)/100;
@@ -6439,15 +6442,15 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
           ulStr.addEventListener("pointerup",()=>{
             if(!armed) return;
             armed=false;
+            try{ ulStr.releasePointerCapture(pid); }catch(_){} // always release (captured on every pointerdown)
             if(dragging){
-              try{ ulStr.releasePointerCapture(pid); }catch(_){}
               ulStr.blur();           // committed via drag — don't enter edit mode
               justDragged=true;       // swallow the trailing click
               setTimeout(()=>{ justDragged=false; },0);
             }
             dragging=false;
           });
-          ulStr.addEventListener("pointercancel",()=>{ armed=false;dragging=false; });
+          ulStr.addEventListener("pointercancel",()=>{ try{ ulStr.releasePointerCapture(pid); }catch(_){} armed=false;dragging=false; });
           // Swallow the click that immediately follows a real drag (so it doesn't focus)
           ulStr.addEventListener("click",(e)=>{ if(justDragged){ e.preventDefault();e.stopPropagation(); } });
         })();
