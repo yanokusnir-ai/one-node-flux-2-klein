@@ -1,0 +1,145 @@
+{
+  "FKP:clip": {
+    "class_type": "CLIPLoader",
+    "inputs": { "clip_name": "qwen_3_8b_fp8mixed.safetensors", "type": "flux2", "device": "default" },
+    "_meta": { "title": "Load CLIP" }
+  },
+  "FKP:vae": {
+    "class_type": "VAELoader",
+    "inputs": { "vae_name": "flux2-vae.safetensors" },
+    "_meta": { "title": "Load VAE" }
+  },
+  "FKP:unet": {
+    "class_type": "UNETLoader",
+    "inputs": { "unet_name": "flux-2-klein-9b.safetensors", "weight_dtype": "default" },
+    "_meta": { "title": "Load Diffusion Model" }
+  },
+  "FKP:lora": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": { "lora_name": "flux2_klein_9b_refcontrol_depth.safetensors", "strength_model": 1.0, "model": ["FKP:unet", 0] },
+    "_meta": { "title": "Load RefControl Depth LoRA" }
+  },
+  "FKP:sampling": {
+    "class_type": "ModelSamplingAuraFlow",
+    "inputs": { "shift": 3, "model": ["FKP:lora", 0] },
+    "_meta": { "title": "ModelSamplingAuraFlow" }
+  },
+  "FKP:da3load": {
+    "class_type": "DownloadAndLoadDepthAnythingV3Model",
+    "inputs": { "model": "da3_large.safetensors", "precision": "auto", "attention": "auto" },
+    "_meta": { "title": "(Down)Load Depth Anything V3 Model" }
+  },
+  "FKP:poseimg": {
+    "class_type": "LoadImage",
+    "inputs": { "image": "placeholder.png" },
+    "_meta": { "title": "Pose" }
+  },
+  "FKP:refimg": {
+    "class_type": "LoadImage",
+    "inputs": { "image": "placeholder.png" },
+    "_meta": { "title": "Reference" }
+  },
+  "FKP:posescale": {
+    "class_type": "ImageScaleToTotalPixels",
+    "inputs": { "image": ["FKP:poseimg", 0], "upscale_method": "nearest-exact", "megapixels": 1, "resolution_steps": 1 },
+    "_meta": { "title": "Scale Pose to 1MP" }
+  },
+  "FKP:depth": {
+    "class_type": "DepthAnything_V3",
+    "inputs": {
+      "da3_model": ["FKP:da3load", 0],
+      "images": ["FKP:posescale", 0],
+      "normalization_mode": "V2-Style",
+      "resize_method": "resize",
+      "invert_depth": false,
+      "keep_model_size": false
+    },
+    "_meta": { "title": "Depth Anything V3" }
+  },
+  "FKP:depthscale": {
+    "class_type": "ImageScaleToTotalPixels",
+    "inputs": { "image": ["FKP:depth", 0], "upscale_method": "nearest-exact", "megapixels": 1, "resolution_steps": 1 },
+    "_meta": { "title": "Scale Depth to 1MP" }
+  },
+  "FKP:getsize": {
+    "class_type": "GetImageSize",
+    "inputs": { "image": ["FKP:depthscale", 0] },
+    "_meta": { "title": "Get Image Size" }
+  },
+  "FKP:latent": {
+    "class_type": "EmptyFlux2LatentImage",
+    "inputs": { "width": ["FKP:getsize", 0], "height": ["FKP:getsize", 1], "batch_size": 1 },
+    "_meta": { "title": "Empty Flux 2 Latent" }
+  },
+  "FKP:depthenc": {
+    "class_type": "VAEEncode",
+    "inputs": { "pixels": ["FKP:depthscale", 0], "vae": ["FKP:vae", 0] },
+    "_meta": { "title": "VAE Encode Depth" }
+  },
+  "FKP:refscale": {
+    "class_type": "ImageScaleToTotalPixels",
+    "inputs": { "image": ["FKP:refimg", 0], "upscale_method": "nearest-exact", "megapixels": 1, "resolution_steps": 1 },
+    "_meta": { "title": "Scale Reference to 1MP" }
+  },
+  "FKP:refenc": {
+    "class_type": "VAEEncode",
+    "inputs": { "pixels": ["FKP:refscale", 0], "vae": ["FKP:vae", 0] },
+    "_meta": { "title": "VAE Encode Reference" }
+  },
+  "FKP:pos": {
+    "class_type": "CLIPTextEncode",
+    "inputs": { "text": "refcontrol", "clip": ["FKP:clip", 0] },
+    "_meta": { "title": "Positive Prompt (refcontrol)" }
+  },
+  "FKP:neg": {
+    "class_type": "CLIPTextEncode",
+    "inputs": { "text": "", "clip": ["FKP:clip", 0] },
+    "_meta": { "title": "Negative Prompt" }
+  },
+  "FKP:posRefDepth": {
+    "class_type": "ReferenceLatent",
+    "inputs": { "conditioning": ["FKP:pos", 0], "latent": ["FKP:depthenc", 0] },
+    "_meta": { "title": "ReferenceLatent pos depth" }
+  },
+  "FKP:posRefRef": {
+    "class_type": "ReferenceLatent",
+    "inputs": { "conditioning": ["FKP:posRefDepth", 0], "latent": ["FKP:refenc", 0] },
+    "_meta": { "title": "ReferenceLatent pos reference" }
+  },
+  "FKP:negRefDepth": {
+    "class_type": "ReferenceLatent",
+    "inputs": { "conditioning": ["FKP:neg", 0], "latent": ["FKP:depthenc", 0] },
+    "_meta": { "title": "ReferenceLatent neg depth" }
+  },
+  "FKP:negRefRef": {
+    "class_type": "ReferenceLatent",
+    "inputs": { "conditioning": ["FKP:negRefDepth", 0], "latent": ["FKP:refenc", 0] },
+    "_meta": { "title": "ReferenceLatent neg reference" }
+  },
+  "FKP:ksampler": {
+    "class_type": "KSampler",
+    "inputs": {
+      "seed": 0,
+      "steps": 4,
+      "cfg": 1,
+      "sampler_name": "er_sde",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": ["FKP:sampling", 0],
+      "positive": ["FKP:posRefRef", 0],
+      "negative": ["FKP:negRefRef", 0],
+      "latent_image": ["FKP:latent", 0]
+    },
+    "_meta": { "title": "KSampler" }
+  },
+  "FKP:decode": {
+    "class_type": "VAEDecode",
+    "inputs": { "samples": ["FKP:ksampler", 0], "vae": ["FKP:vae", 0] },
+    "_meta": { "title": "VAE Decode" }
+  },
+  "FKP:save": {
+    "class_type": "SaveImage",
+    "inputs": { "images": ["FKP:decode", 0], "filename_prefix": "one-node-flux-2-klein/FK" },
+    "_meta": { "title": "Save Image" }
+  }
+}

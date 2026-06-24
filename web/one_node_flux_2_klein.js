@@ -561,6 +561,9 @@ app.registerExtension({
           fsSource:     saved.fsSource||null,   // faceswap: image whose face to use
           fsLora:       saved.fsLora||"",       // faceswap: LoRA filename
           fsResizeLonger: saved.fsResizeLonger||0, // 0 = disabled, >0 = resize longer side to this px
+          poseImage:    saved.poseImage||null,  // pose: structure source (depth is extracted from this)
+          poseRef:      saved.poseRef||null,    // pose: appearance/content reference image
+          poseDepthModel: saved.poseDepthModel||"da3_large.safetensors", // pose: DepthAnythingV3 model variant
           bgRemovalModel: saved.bgRemovalModel||"",  // birefnet model for remove bg
           // Prompt — shared (active pill's value) + per-pill storage
           prompt:       saved.prompt||"",
@@ -568,6 +571,7 @@ app.registerExtension({
           promptEdit:   saved.promptEdit!==undefined?saved.promptEdit:(saved.pill==="edit"?saved.prompt||"":""),
           promptPaint:  saved.promptPaint!==undefined?saved.promptPaint:(saved.pill==="inpaint"?saved.prompt||"":""),
           promptFs:     saved.promptFs!==undefined?saved.promptFs:(saved.pill==="faceswap"?saved.prompt||"":""),
+          promptPose:   saved.promptPose!==undefined?saved.promptPose:(saved.pill==="pose"?saved.prompt||"":""),
           // LoRAs
           userLoras:    saved.userLoras||[{name:"",strength:1.0},{name:"",strength:1.0},{name:"",strength:1.0}],
           // Generation state
@@ -586,7 +590,7 @@ app.registerExtension({
       const S=self._fk_S;
       // Sync S.prompt to the active pill's slot on init (covers first load before _pillPromptKey is available)
       {
-        const _initKey=S.pill==="edit"?"promptEdit":S.pill==="inpaint"?"promptPaint":S.pill==="faceswap"?"promptFs":S.pill==="i2i"?"promptI2i":"promptT2i";
+        const _initKey=S.pill==="edit"?"promptEdit":S.pill==="inpaint"?"promptPaint":S.pill==="faceswap"?"promptFs":S.pill==="pose"?"promptPose":S.pill==="i2i"?"promptI2i":"promptT2i";
         S.prompt=S[_initKey]||S.prompt||"";
         S[_initKey]=S.prompt;
       }
@@ -605,8 +609,9 @@ app.registerExtension({
           advancedUI:S.advancedUI, steps:S.steps, cfg:S.cfg, sampler:S.sampler, scheduler:S.scheduler, denoise:S.denoise,
           image1Name:S.image1Name, image2Name:S.image2Name,
           fsTarget:S.fsTarget, fsSource:S.fsSource, fsLora:S.fsLora, fsResizeLonger:S.fsResizeLonger, bgRemovalModel:S.bgRemovalModel,
+          poseImage:S.poseImage, poseRef:S.poseRef, poseDepthModel:S.poseDepthModel,
           prompt:S.prompt, promptT2i:S.promptT2i, promptEdit:S.promptEdit,
-          promptPaint:S.promptPaint, promptFs:S.promptFs, promptI2i:S.promptI2i,
+          promptPaint:S.promptPaint, promptFs:S.promptFs, promptI2i:S.promptI2i, promptPose:S.promptPose,
           i2iImage:S.i2iImage, i2iDenoise:S.i2iDenoise, i2iResizeLonger:S.i2iResizeLonger,
           userLoras:S.userLoras, soundEnabled, extLoaders:S.extLoaders,
           downscaleRef:S.downscaleRef, downscaleRefMP:S.downscaleRefMP,
@@ -662,6 +667,10 @@ app.registerExtension({
           }catch(ex){}
           return S.resW;
         }
+        if(activePill==="pose"){
+          try{ return _poseImgDims._getDims().w||0; }catch(ex){}
+          return S.resW;
+        }
         return S.isCustomRes?snapRes(S.customW):S.resW;
       };
       const getEffectiveH=()=>{
@@ -694,6 +703,10 @@ app.registerExtension({
             }
             return d.h||0;
           }catch(ex){}
+          return S.resH;
+        }
+        if(activePill==="pose"){
+          try{ return _poseImgDims._getDims().h||0; }catch(ex){}
           return S.resH;
         }
         return S.isCustomRes?snapRes(S.customH):S.resH;
@@ -1348,11 +1361,12 @@ app.registerExtension({
       const pillEdit    =Pill("EDIT",    activePill==="edit",     ()=>setPill("edit"));
       const pillInpaint =Pill("PAINT",   activePill==="inpaint",  ()=>setPill("inpaint"));
       const pillFaceswap=Pill("FACESWAP",activePill==="faceswap", ()=>setPill("faceswap"));
-      topBarLeft.append(pillT2I,pillI2I,pillEdit,pillInpaint,pillFaceswap);
+      const pillPose    =Pill("POSE",    activePill==="pose",     ()=>setPill("pose"));
+      topBarLeft.append(pillT2I,pillI2I,pillEdit,pillInpaint,pillFaceswap,pillPose);
 
       let _promptTARef=null; // set after promptTA is created
 
-      const _pillPromptKey=(p)=>p==="t2i"?"promptT2i":p==="edit"?"promptEdit":p==="inpaint"?"promptPaint":p==="i2i"?"promptI2i":"promptFs";
+      const _pillPromptKey=(p)=>p==="t2i"?"promptT2i":p==="edit"?"promptEdit":p==="inpaint"?"promptPaint":p==="i2i"?"promptI2i":p==="pose"?"promptPose":"promptFs";
 
       function setPill(p){
         // Save current prompt to old pill's slot before switching
@@ -1369,13 +1383,14 @@ app.registerExtension({
         S.prompt=S[_pillPromptKey(p)];
         if(_promptTARef){ _promptTARef.value=S.prompt; if(typeof _promptOvTA!=="undefined"&&_promptOvTA) _promptOvTA.value=S.prompt; }
         persist();
-        [pillT2I,pillI2I,pillEdit,pillInpaint,pillFaceswap].forEach(b=>{
+        [pillT2I,pillI2I,pillEdit,pillInpaint,pillFaceswap,pillPose].forEach(b=>{
           const isActive=
             (b===pillT2I&&p==="t2i")||
             (b===pillI2I&&p==="i2i")||
             (b===pillEdit&&p==="edit")||
             (b===pillInpaint&&p==="inpaint")||
-            (b===pillFaceswap&&p==="faceswap");
+            (b===pillFaceswap&&p==="faceswap")||
+            (b===pillPose&&p==="pose");
           b.style.background=isActive?LIME:C.bg2;
           b.style.color=isActive?"#111":C.text;
           b.style.borderColor=isActive?LIME:C.border;
@@ -5951,7 +5966,59 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
       if(S.fsTarget) _fsTargetSlot._restorePreview(S.fsTarget);
       if(S.fsSource) _fsSourceSlot._restorePreview(S.fsSource);
 
-      leftPanel.append(i2iPanel,editPanel,inpaintPanel,faceswapPanel,resSect,advPanel,seedRow,_seedLockedWarn,genRow);
+      // ── POSE panel (RefControl depth-guided generation) ──────────────────────
+      // Pose image → DepthAnythingV3 → depth latent (structure); Reference image →
+      // reference latent (appearance). Both feed the refcontrol_depth LoRA chain.
+      const posePanel=mk("div",{display:"none",flexDirection:"column",gap:"6px"});
+
+      const _poseImgDims=_mkFsDimsLbl();
+      const _poseRefDims=_mkFsDimsLbl();
+
+      const _poseSlotRow=mk("div",{display:"flex",gap:"10px",alignItems:"flex-start"});
+
+      const _poseImgCard=mk("div",{display:"flex",flexDirection:"column",gap:"3px",alignItems:"center"});
+      const _poseImgSlot=ImgSlot(false,(name)=>{
+        S.poseImage=name||null;
+        if(name){ _poseImgSlot.el.style.borderColor=""; tx(_poseImgLbl,"Pose"); _poseImgLbl.style.color=C.muted; }
+        persist();
+      },(w,h)=>_poseImgDims._set(w,h));
+      const _poseImgLbl=mk("div",{fontSize:"8px",fontWeight:"700",color:C.muted,
+        textTransform:"uppercase",letterSpacing:".07em",textAlign:"center"});
+      tx(_poseImgLbl,"Pose");
+      _poseImgCard.append(_poseImgSlot.el,_poseImgLbl,_poseImgDims);
+
+      const _poseRefCard=mk("div",{display:"flex",flexDirection:"column",gap:"3px",alignItems:"center"});
+      const _poseRefSlot=ImgSlot(false,(name)=>{
+        S.poseRef=name||null;
+        if(name){ _poseRefSlot.el.style.borderColor=""; tx(_poseRefLbl,"Reference"); _poseRefLbl.style.color=C.muted; }
+        persist();
+      },(w,h)=>_poseRefDims._set(w,h));
+      const _poseRefLbl=mk("div",{fontSize:"8px",fontWeight:"700",color:C.muted,
+        textTransform:"uppercase",letterSpacing:".07em",textAlign:"center"});
+      tx(_poseRefLbl,"Reference");
+      _poseRefCard.append(_poseRefSlot.el,_poseRefLbl,_poseRefDims);
+
+      _poseSlotRow.append(_poseImgCard,_poseRefCard);
+
+      // Depth model chooser — defaults to Large; user can pick other DA3 variants
+      const POSE_DEPTH_MODELS=["da3_large.safetensors","da3_giant.safetensors","da3_base.safetensors","da3_small.safetensors","da3mono_large.safetensors","da3metric_large.safetensors","da3nested_giant_large.safetensors"];
+      const _poseDepthRow=mk("div",{display:"flex",alignItems:"center",gap:"6px",marginTop:"2px"});
+      const _poseDepthLbl=mk("span",{fontSize:"8px",color:C.muted,whiteSpace:"nowrap",flexShrink:"0",
+        textTransform:"uppercase",letterSpacing:".06em"});
+      tx(_poseDepthLbl,"Depth model");
+      const _poseDepthDD=DD(POSE_DEPTH_MODELS,S.poseDepthModel||"da3_large.safetensors",(v)=>{ S.poseDepthModel=v; persist(); });
+      _poseDepthRow.append(_poseDepthLbl,_poseDepthDD.el);
+
+      const _poseHint=mk("div",{fontSize:"8px",color:C.muted,lineHeight:"1.5"});
+      tx(_poseHint,"Pose = structure (depth extracted). Reference = appearance. Models auto-download on first use.");
+
+      posePanel.append(_poseSlotRow,_poseDepthRow,_poseHint);
+
+      // Restore pose slots from state
+      if(S.poseImage) _poseImgSlot._restorePreview(S.poseImage);
+      if(S.poseRef)   _poseRefSlot._restorePreview(S.poseRef);
+
+      leftPanel.append(i2iPanel,editPanel,inpaintPanel,faceswapPanel,posePanel,resSect,advPanel,seedRow,_seedLockedWarn,genRow);
 
       // ── RIGHT PANEL — Preview area fills available height ──
       const rightPanel=mk("div",{flex:"1",minWidth:"0",display:"flex",flexDirection:"column",overflow:"hidden"});
@@ -6119,6 +6186,10 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
         _mkPUSection("Faceswap"),
         _mkPUItem("Target","◎",()=>_puUpload(n=>{setPill("faceswap");S.fsTarget=n;_fsTargetSlot._restorePreview(n);persist();})),
         _mkPUItem("Source","◈",()=>_puUpload(n=>{setPill("faceswap");S.fsSource=n;_fsSourceSlot._restorePreview(n);persist();})),
+        _mkPUDivider(),
+        _mkPUSection("Pose"),
+        _mkPUItem("Pose","◇",()=>_puUpload(n=>{setPill("pose");S.poseImage=n;_poseImgSlot._restorePreview(n);persist();})),
+        _mkPUItem("Reference","◈",()=>_puUpload(n=>{setPill("pose");S.poseRef=n;_poseRefSlot._restorePreview(n);persist();})),
       );
 
       let _puDropOpen=false;
@@ -7688,7 +7759,7 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
       const _slotErr=(slot,lbl)=>{ slot.el.style.borderColor="#e05555"; tx(lbl,"Required!"); lbl.style.color="#e05555"; };
 
       genBtn.onclick=async()=>{
-        if(!S.prompt.trim()&&activePill!=="faceswap"){showError("Please enter a prompt.");return;}
+        if(!S.prompt.trim()&&activePill!=="faceswap"&&activePill!=="pose"){showError("Please enter a prompt.");return;}
         if(activePill==="inpaint"){
           if(_paintMode==="sketch"){
             if(!_paintSlot.hasFile()){ _slotErr(_paintSlot,_paintSlotLbl); return; }
@@ -7706,6 +7777,10 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
           if(!_fsSourceSlot.hasFile()){_slotErr(_fsSourceSlot,_fsSourceLbl);return;}
           if(!S.fsLora||S.fsLora==="none") {showError("FACESWAP: select a Faceswap LoRA in Settings.");return;}
         }
+        if(activePill==="pose"){
+          if(!_poseImgSlot.hasFile()){_slotErr(_poseImgSlot,_poseImgLbl);return;}
+          if(!_poseRefSlot.hasFile()){_slotErr(_poseRefSlot,_poseRefLbl);return;}
+        }
         const _hasExtModel=(()=>{ const n=app.graph.getNodeById(self.id); const inputs=n?.inputs||[]; const slot=inputs.find(i=>i.name==="model"); return slot?.link!=null; })();
         if(!S.model&&!_hasExtModel){showError("No model selected. Open Settings and choose a model.");return;}
 
@@ -7716,6 +7791,7 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
         const _isInpaintSnap=activePill==="inpaint"&&_paintMode==="inpaint"&&_maskName!=="__outpaint__";
         const _isOutpaintSnap=activePill==="inpaint"&&_paintMode==="inpaint"&&_maskName==="__outpaint__";
         const _isFaceswapSnap=activePill==="faceswap";
+        const _isPoseSnap=activePill==="pose";
         const _isPaintSnap=_isSketchSnap||_isInpaintSnap||_isOutpaintSnap;
         let _snapMode;
         if(_isSketchSnap) _snapMode="sketch";
@@ -7727,9 +7803,9 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
           prompt:S.prompt,
           w:getEffectiveW(), h:getEffectiveH(),
           mode:_snapMode,
-          image1:activePill==="i2i"?(S.i2iImage||null):(_isPaintSnap?(_paintSlot.name||null):(_isFaceswapSnap?(S.fsTarget||null):(activePill==="edit"?(S.image1Name||null):null))),
+          image1:activePill==="i2i"?(S.i2iImage||null):(_isPaintSnap?(_paintSlot.name||null):(_isFaceswapSnap?(S.fsTarget||null):(_isPoseSnap?(S.poseImage||null):(activePill==="edit"?(S.image1Name||null):null)))),
           i2iDenoise:activePill==="i2i"?S.i2iDenoise:undefined,
-          image2:(_isFaceswapSnap?(S.fsSource||null):(activePill==="edit"?(S.image2Name||null):null)),
+          image2:(_isFaceswapSnap?(S.fsSource||null):(_isPoseSnap?(S.poseRef||null):(activePill==="edit"?(S.image2Name||null):null))),
           mask:_isInpaintSnap?(_maskName||null):null,
           outpaintExpand:_isOutpaintSnap?{top:_opTop,right:_opRight,bottom:_opBottom,left:_opLeft}:null,
           useSizeSource:(activePill==="edit")?(_useSizeSource||null):null,
@@ -7770,12 +7846,14 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
         const isInpaintMode=activePill==="inpaint"&&_paintMode==="inpaint"&&_maskName!=="__outpaint__";
         const isOutpaintMode=activePill==="inpaint"&&_paintMode==="inpaint"&&_maskName==="__outpaint__";
         const isFaceswapMode=activePill==="faceswap";
+        const isPoseMode=activePill==="pose";
         const isI2IMode=activePill==="i2i";
         let wfUrl;
         if(activePill==="edit"||isSketchMode) wfUrl="/flux_klein/workflow_edit";
         else if(isInpaintMode) wfUrl="/flux_klein/workflow_inpaint";
         else if(isOutpaintMode) wfUrl="/flux_klein/workflow_outpaint";
         else if(isFaceswapMode) wfUrl="/flux_klein/workflow_faceswap";
+        else if(isPoseMode) wfUrl="/flux_klein/workflow_pose";
         else if(isI2IMode) wfUrl="/flux_klein/workflow_i2i";
         else wfUrl="/flux_klein/workflow_t2i";
 
@@ -8056,6 +8134,46 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
           const fsLoRaRef=_applyLoRAs("FKF:226","FKF:");
           set(WFF.sampling,"model",typeof fsLoRaRef==="string"?[fsLoRaRef,0]:fsLoRaRef);
 
+        } else if(isPoseMode){
+          // ── POSE workflow patching (RefControl depth) ─────────────────────
+          // Pose image → DepthAnythingV3 → depth latent; Reference image → reference
+          // latent. Both conditioning chains run through the refcontrol_depth LoRA.
+          const WFP={
+            model:"FKP:unet", lora:"FKP:lora", clip:"FKP:clip", vae:"FKP:vae",
+            poseImg:"FKP:poseimg", refImg:"FKP:refimg", da3:"FKP:da3load",
+            promptPos:"FKP:pos", sampling:"FKP:sampling", sampler:"FKP:ksampler", save:"FKP:save",
+          };
+          if(extModel){ delete prompt[WFP.model]; prompt[WFP.lora].inputs.model=extModel; }
+          else set(WFP.model,"unet_name",S.model||"flux-2-klein-9b.safetensors");
+          if(extClip){ delete prompt[WFP.clip]; prompt["FKP:pos"].inputs.clip=extClip; prompt["FKP:neg"].inputs.clip=extClip; }
+          else set(WFP.clip,"clip_name",S.textEncoder||"qwen_3_8b_fp8mixed.safetensors");
+          if(extVae){ delete prompt[WFP.vae]; prompt["FKP:depthenc"].inputs.vae=extVae; prompt["FKP:refenc"].inputs.vae=extVae; prompt["FKP:decode"].inputs.vae=extVae; }
+          else set(WFP.vae,"vae_name",S.vae||"flux2-vae.safetensors");
+
+          set(WFP.poseImg,"image",S.poseImage||"placeholder.png");
+          set(WFP.refImg, "image",S.poseRef||"placeholder.png");
+          set(WFP.da3,    "model",S.poseDepthModel||"da3_large.safetensors");
+          set(WFP.save,   "filename_prefix","one-node-flux-2-klein/FK");
+
+          // Positive prompt: always include the "refcontrol" trigger that activates
+          // the depth control, then append the user's description (if any).
+          let _posePrompt="refcontrol";
+          if(_effectivePrompt.trim()){
+            _posePrompt=/(^|[^a-z])refcontrol([^a-z]|$)/i.test(_effectivePrompt)
+              ? _effectivePrompt
+              : "refcontrol "+_effectivePrompt;
+          }
+          set(WFP.promptPos,"text",_posePrompt);
+
+          const seed=S.randomizeSeed?Math.floor(Math.random()*999999999999):S.seed;
+          if(S.randomizeSeed){S.seed=seed;seedInp.setVal(seed);_advSeedInp.setVal(seed);_advSeedRefresh();persist();}
+          set(WFP.sampler,"seed",seed); _setAdv(WFP.sampler);
+
+          // LoRA chain: workflow has FKP:lora (refcontrol depth) hardcoded. User LoRAs
+          // from Settings are injected after it, then wired into ModelSamplingAuraFlow.
+          const poseLoraRef=_applyLoRAs("FKP:lora","FKP:");
+          set(WFP.sampling,"model",typeof poseLoraRef==="string"?[poseLoraRef,0]:poseLoraRef);
+
         } else if(isI2IMode){
           // ── I2I workflow patching ──────────────────────────────────────────
           if(extModel){ delete prompt["FK:165"]; }
@@ -8237,7 +8355,8 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
         editPanel.style.display=activePill==="edit"?"flex":"none";
         inpaintPanel.style.display=activePill==="inpaint"?"flex":"none";
         faceswapPanel.style.display=activePill==="faceswap"?"flex":"none";
-        resSect.style.display=(activePill==="inpaint"||activePill==="faceswap"||activePill==="i2i")?"none":"flex";
+        posePanel.style.display=activePill==="pose"?"flex":"none";
+        resSect.style.display=(activePill==="inpaint"||activePill==="faceswap"||activePill==="i2i"||activePill==="pose")?"none":"flex";
         updateSizeControls();
       }
 
@@ -8303,6 +8422,10 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
         _mkGalCtxSec("Faceswap"),
         _mkGalCtxItem("Target","◎",()=>{ if(_galCtxImg)_loadIntoFsSlot(_galCtxImg,"target"); }),
         _mkGalCtxItem("Source","◈",()=>{ if(_galCtxImg)_loadIntoFsSlot(_galCtxImg,"source"); }),
+        _mkGalCtxDiv(),
+        _mkGalCtxSec("Pose"),
+        _mkGalCtxItem("Pose","◇",()=>{ if(_galCtxImg)_loadIntoPoseSlot(_galCtxImg,"pose"); }),
+        _mkGalCtxItem("Reference","◈",()=>{ if(_galCtxImg)_loadIntoPoseSlot(_galCtxImg,"reference"); }),
       );
       document.body.appendChild(_galCtxMenu);
       document.addEventListener("click",()=>{ _galCtxMenu.style.display="none"; });
@@ -8862,7 +8985,7 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
         try{
           const mode=meta.mode||"t2i";
           // Map meta.mode → pill name
-          const pillMap={"sketch":"inpaint","outpaint":"inpaint","inpaint":"inpaint","edit":"edit","i2i":"i2i","faceswap":"faceswap","t2i":"t2i"};
+          const pillMap={"sketch":"inpaint","outpaint":"inpaint","inpaint":"inpaint","edit":"edit","i2i":"i2i","faceswap":"faceswap","pose":"pose","t2i":"t2i"};
           const pill=pillMap[mode]||"t2i";
           // Prompt
           if(meta.prompt){
@@ -8897,6 +9020,9 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
           } else if(mode==="faceswap"){
             if(meta.image1){ const n=await _ri(meta.image1); if(n){S.fsTarget=n;_fsTargetSlot._restorePreview(n);} }
             if(meta.image2){ const n=await _ri(meta.image2); if(n){S.fsSource=n;_fsSourceSlot._restorePreview(n);} }
+          } else if(mode==="pose"){
+            if(meta.image1){ const n=await _ri(meta.image1); if(n){S.poseImage=n;_poseImgSlot._restorePreview(n);} }
+            if(meta.image2){ const n=await _ri(meta.image2); if(n){S.poseRef=n;_poseRefSlot._restorePreview(n);} }
           } else if(mode==="sketch"||mode==="inpaint"||mode==="outpaint"){
             if(meta.image1){ const n=await _ri(meta.image1); if(n){ _sketchSaving=true;_paintSlot._restorePreview(n);_sketchSaving=false; } }
           }
@@ -9069,6 +9195,22 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
           S.fsSource=inputName; _fsSourceSlot._restorePreview(inputName);
         } else {
           S.fsTarget=inputName; _fsTargetSlot._restorePreview(inputName);
+        }
+        persist();
+        lightbox.style.display="none";_lbActiveImg=null;
+        closeOverlayFade(galleryOverlay);
+      };
+
+      // Load into POSE pose or reference slot — switches to POSE pill
+      const _loadIntoPoseSlot=async(v,which)=>{
+        if(activePill!=="pose") setPill("pose");
+        let inputName;
+        try{ inputName=await _uploadOutputToInput(v); }
+        catch(err){ console.warn("[FluxKlein] load-into-pose:",err); inputName=v.filename; }
+        if(which==="reference"){
+          S.poseRef=inputName; _poseRefSlot._restorePreview(inputName);
+        } else {
+          S.poseImage=inputName; _poseImgSlot._restorePreview(inputName);
         }
         persist();
         lightbox.style.display="none";_lbActiveImg=null;
@@ -9453,6 +9595,8 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
           targetSlot=_paintSlot;
         } else if(activePill==="faceswap"){
           targetSlot=!_fsTargetSlot.hasFile()?_fsTargetSlot:_fsSourceSlot;
+        } else if(activePill==="pose"){
+          targetSlot=!_poseImgSlot.hasFile()?_poseImgSlot:_poseRefSlot;
         }
         if(targetSlot) targetSlot.loadFile(file);
       },{capture:true});

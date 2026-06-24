@@ -486,6 +486,7 @@ PromptServer.instance.routes.get("/flux_klein/workflow_edit")(_serve_json("workf
 PromptServer.instance.routes.get("/flux_klein/workflow_inpaint")(_serve_json("workflows/inpaint_workflow.json"))
 PromptServer.instance.routes.get("/flux_klein/workflow_outpaint")(_serve_json("workflows/outpaint_workflow.json"))
 PromptServer.instance.routes.get("/flux_klein/workflow_faceswap")(_serve_json("workflows/faceswap_workflow.json"))
+PromptServer.instance.routes.get("/flux_klein/workflow_pose")(_serve_json("workflows/pose_workflow.json"))
 PromptServer.instance.routes.get("/flux_klein/workflow_remove_bg")(_serve_json("workflows/remove_bg_workflow.json"))
 
 
