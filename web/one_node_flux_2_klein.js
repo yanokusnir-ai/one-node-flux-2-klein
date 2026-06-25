@@ -6332,7 +6332,22 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
         });
         tx(_rowNum,String(idx+1));
 
-        // Trigger words area — shown below the control row (subtle, not a heavy block)
+        // Enable/disable toggle — lets the user keep a LoRA loaded but inactive,
+        // instead of zeroing its strength. Sits at the front of the row.
+        const _enInit=S.userLoras[idx].enabled!==false;
+        const enTog=mk("div",{
+          width:"30px",height:"16px",borderRadius:"8px",position:"relative",
+          cursor:"pointer",flexShrink:"0",transition:"background .18s",
+          background:_enInit?"rgba(240,255,65,.85)":"rgba(255,255,255,.13)",
+        });
+        enTog.title="Toggle this LoRA on/off (keeps it loaded when off)";
+        const enThumb=mk("div",{position:"absolute",top:"2px",left:_enInit?"16px":"2px",
+          width:"12px",height:"12px",borderRadius:"50%",
+          background:_enInit?"#111":"#888",transition:"left .18s,background .18s"});
+        enTog.appendChild(enThumb);
+
+        // Trigger words area — shown below the control row (subtle, not a heavy block).
+        // paddingLeft aligns it under the dropdown: badge(17)+gap(7).
         const trigRow=mk("div",{display:"none",flexDirection:"column",gap:"6px",
           marginTop:"1px",paddingLeft:"24px",
         });
@@ -6497,26 +6512,31 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
           ulStr.addEventListener("click",(e)=>{ if(justDragged){ e.preventDefault();e.stopPropagation(); } });
         })();
 
-        const ulClr=mk("button",{
-          background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.12)",borderRadius:"7px",
-          cursor:"pointer",color:C.muted,fontSize:"9px",fontWeight:"700",letterSpacing:".04em",
-          padding:"6px 9px",outline:"none",transition:"all .15s",flexShrink:"0",
-        });
-        tx(ulClr,"CLR");
-        ulClr.onmouseenter=()=>{ ulClr.style.background="rgba(255,80,80,.14)";ulClr.style.borderColor="rgba(255,80,80,.3)";ulClr.style.color="#ff7777"; };
-        ulClr.onmouseleave=()=>{ ulClr.style.background="rgba(255,255,255,.05)";ulClr.style.borderColor="rgba(255,255,255,.12)";ulClr.style.color=C.muted; };
-        ulClr.onclick=()=>{
-          S.userLoras[idx]={name:"",strength:0};ulDD.set("none");ulStr.value="0";
-          trigRow.style.display="none";
-          _ulUpdateBtn();persist();
+        // Reflect the slot's enabled state: move the switch and dim the controls
+        // when off (values are kept — only generation skips a disabled slot).
+        // To fully empty a slot, set the dropdown to "none" (handled in ulDD onChange).
+        const _applyEnabled=()=>{
+          const en=S.userLoras[idx].enabled!==false;
+          enTog.style.background=en?"rgba(240,255,65,.85)":"rgba(255,255,255,.13)";
+          enThumb.style.left=en?"16px":"2px";
+          enThumb.style.background=en?"#111":"#888";
+          const op=en?"1":"0.4";
+          _rowNum.style.opacity=op; ulDD.el.style.opacity=op;
+          ulStr.style.opacity=op; trigRow.style.opacity=op;
+        };
+        enTog.onclick=()=>{
+          S.userLoras[idx].enabled=!(S.userLoras[idx].enabled!==false);
+          _applyEnabled();_ulUpdateBtn();persist();
         };
 
-        rowCtrl.append(_rowNum,ulDD.el,ulStr,ulClr);
+        rowCtrl.append(_rowNum,ulDD.el,ulStr,enTog);
         row.append(rowCtrl,trigRow);
         row._dd=ulDD;row._str=ulStr;
         // Clear the slot's UI completely, including the trigger row (used on restore).
-        row._reset=()=>{ ulDD.set("none"); ulStr.value="0"; trigRow.style.display="none"; };
+        row._reset=()=>{ ulDD.set("none"); ulStr.value="0"; trigRow.style.display="none"; _applyEnabled(); };
+        row._applyEnabled=_applyEnabled;
         row._refreshTrig=_refreshTrigWords;
+        _applyEnabled();
 
         // Restore trigger words display if lora already selected
         if(S.userLoras[idx].name&&S.userLoras[idx].name!=="none"){
@@ -6531,8 +6551,11 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
         if(_ulAddBtn) _ulAddBtn.style.display=S.userLoras.length>=_UL_MAX?"none":"flex";
         if(_ulRemoveBtn) _ulRemoveBtn.style.display=S.userLoras.length>_UL_DEFAULT?"flex":"none";
       };
+      // Normalize older saved slots that predate the enable/disable toggle so every
+      // slot carries an explicit `enabled` flag (missing `enabled` is treated as on).
+      S.userLoras=(S.userLoras||[]).map(l=>({name:l.name||"",strength:l.strength===undefined?1.0:l.strength,enabled:l.enabled!==false}));
       // Clamp restored state to [_UL_DEFAULT, _UL_MAX]
-      while(S.userLoras.length<_UL_DEFAULT) S.userLoras.push({name:"",strength:1.0});
+      while(S.userLoras.length<_UL_DEFAULT) S.userLoras.push({name:"",strength:1.0,enabled:true});
       if(S.userLoras.length>_UL_MAX) S.userLoras.length=_UL_MAX;
 
       const _ulRebuildRows=()=>{
@@ -6565,7 +6588,7 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
 
       const _ulAddSlot=()=>{
         if(S.userLoras.length>=_UL_MAX) return;
-        S.userLoras.push({name:"",strength:1.0});
+        S.userLoras.push({name:"",strength:1.0,enabled:true});
         _ulRebuildRows();
         _ulSyncSlotsToModels();
         persist();
@@ -6648,7 +6671,7 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
         await _loadCustomTriggers();
         const trigParts=[];
         for(const ul of S.userLoras){
-          if(!ul.name||ul.name==="none"||!(+(ul.strength||0)>0)) continue;
+          if(!ul.name||ul.name==="none"||ul.enabled===false||!(+(ul.strength||0)>0)) continue;
           // Custom trigger words override metadata
           const custom=_getCustomTrigger(ul.name);
           if(custom){ trigParts.push(custom); continue; }
@@ -6688,7 +6711,7 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
       _ulBtn.onclick=()=>{ _ulOverlay.style.display="flex"; };
 
       const _ulUpdateBtn=()=>{
-        const n=S.userLoras.filter(l=>l.name&&l.name!=="none").length;
+        const n=S.userLoras.filter(l=>l.name&&l.name!=="none"&&l.enabled!==false).length;
         tx(_ulBtnBadge,String(n));
         _ulBtnBadge.style.display=n>0?"":"none";
         _ulBtn.style.borderColor=n>0?LIME:"rgba(240,255,65,.35)";
@@ -7778,7 +7801,7 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
           mask:_isInpaintSnap?(_maskName||null):null,
           outpaintExpand:_isOutpaintSnap?{top:_opTop,right:_opRight,bottom:_opBottom,left:_opLeft}:null,
           useSizeSource:(activePill==="edit")?(_useSizeSource||null):null,
-          userLoras:S.userLoras.filter(l=>l.name&&l.name!=="none"&&+(l.strength||0)>0).map(l=>({n:l.name.split(/[\\/]/).pop(),s:l.strength})),
+          userLoras:S.userLoras.filter(l=>l.name&&l.name!=="none"&&l.enabled!==false&&+(l.strength||0)>0).map(l=>({n:l.name.split(/[\\/]/).pop(),s:l.strength})),
           ...(S.advancedUI?{steps:S.steps||4, cfg:S.cfg!==undefined?S.cfg:1,
             sampler:S.sampler||"er_sde", scheduler:S.scheduler||"simple",
             advancedUI:true}:{}),
@@ -7894,7 +7917,7 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
           const toPrev=(p)=>typeof p==="string"?[p,0]:p;
           let prev=chainSrc;
           (S.userLoras||[]).forEach((ul,i)=>{
-            if(!ul.name||ul.name==="none"||!(+(ul.strength||0)>0)) return;
+            if(!ul.name||ul.name==="none"||ul.enabled===false||!(+(ul.strength||0)>0)) return;
             const id=`${idPrefix}UL${i+1}`;
             prompt[id]={
               inputs:{lora_name:ul.name,strength_model:+(ul.strength??1.0),model:toPrev(prev)},
@@ -8962,15 +8985,15 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
           const _wantSlots=Math.min(_UL_MAX,Math.max(_UL_DEFAULT,_metaLoraCount));
           if(S.userLoras.length!==_wantSlots){
             if(S.userLoras.length<_wantSlots){
-              while(S.userLoras.length<_wantSlots) S.userLoras.push({name:"",strength:1.0});
+              while(S.userLoras.length<_wantSlots) S.userLoras.push({name:"",strength:1.0,enabled:true});
             } else {
               S.userLoras.length=_wantSlots;
             }
             _ulRebuildRows();
           }
-          // Always reset all slots first (incl. trigger rows), then apply what meta has
+          // Always reset all slots first (incl. trigger rows + enabled state), then apply what meta has
           _ulRowEls.forEach((r,i)=>{
-            S.userLoras[i]={name:"",strength:0};
+            S.userLoras[i]={name:"",strength:0,enabled:true};
             r._reset();
           });
           if(Array.isArray(meta.userLoras)&&meta.userLoras.length&&_loraList.length){
@@ -8982,9 +9005,9 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
               const match=loraOpts.find(o=>nd(o)===nd(ul.n||""))||
                 loraOpts.find(o=>nd(o).split("/").pop()===basename);
               if(match&&match!=="none"){
-                S.userLoras[i].name=match; S.userLoras[i].strength=+(ul.s??1);
+                S.userLoras[i].name=match; S.userLoras[i].strength=+(ul.s??1); S.userLoras[i].enabled=true;
                 _ulRowEls[i]._dd.set(match); _ulRowEls[i]._str.value=String(S.userLoras[i].strength);
-                _ulRowEls[i]._refreshTrig(match);
+                _ulRowEls[i]._refreshTrig(match); _ulRowEls[i]._applyEnabled();
               }
             });
           }
