@@ -583,6 +583,9 @@ app.registerExtension({
           // UI layout: "classic" = wide prompt under the preview (default),
           // "tall" = prompt in the left column so the preview gets full height.
           layoutMode:   saved.layoutMode||"classic",
+          // Outpaint seam feather (px the mask fades into the original). 0 = auto
+          // (the previous min(48, edge/6) heuristic), so existing users see no change.
+          opFeather:    saved.opFeather!==undefined?saved.opFeather:0,
           previewUrl:   null,
         };
       }
@@ -613,7 +616,7 @@ app.registerExtension({
           i2iImage:S.i2iImage, i2iDenoise:S.i2iDenoise, i2iResizeLonger:S.i2iResizeLonger,
           userLoras:S.userLoras, soundEnabled, extLoaders:S.extLoaders,
           downscaleRef:S.downscaleRef, downscaleRefMP:S.downscaleRefMP,
-          layoutMode:S.layoutMode,
+          layoutMode:S.layoutMode, opFeather:S.opFeather,
         });
       };
 
@@ -4733,6 +4736,15 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
         _opResRefresh();
       };
 
+      // Feather width (px) the mask fades into the original at the seam.
+      // S.opFeather === 0 means "auto": the original min(cap, edge/div) heuristic.
+      // A user value overrides it, clamped so it never exceeds half the original region.
+      const _opFeatherPx=(edgeMin,autoCap,autoDiv)=>{
+        const auto=Math.floor(edgeMin/(autoDiv||6));
+        const base=(+S.opFeather>0)?+S.opFeather:Math.min(autoCap,auto);
+        return Math.max(1,Math.min(base,Math.floor(edgeMin/2)));
+      };
+
       const _opCalcDims=()=>{
         const curTop=Math.max(0,Math.round((+_opTopField._inp.value||0)/8)*8);
         const curRight=Math.max(0,Math.round((+_opRightField._inp.value||0)/8)*8);
@@ -4772,12 +4784,30 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
       _opFieldsRow.append(_opTopField,_opRightField,_opBottomField,_opLeftField);
       _opRow1.append(_opExpandLbl,_opFieldsRow);
 
-      // ── Row 2: size badge + scale ─────────────────────────────────────────
+      // ── Feather control: how far the mask fades into the original at the seam ──
+      // 0 = Auto (the original heuristic). Higher = softer blend, fewer visible seams.
+      const _opFeatherRow=mk("div",{
+        display:"flex",alignItems:"center",gap:"6px",
+        border:`1px solid ${C.border}`,borderRadius:"6px",padding:"5px 10px",
+        background:C.bg1,
+      });
+      const _opFeatherLbl=mk("span",{fontSize:"9px",fontWeight:"600",color:C.muted,whiteSpace:"nowrap"});
+      tx(_opFeatherLbl,"Seam feather");
+      const _opFeatherSlider=mk("input",{width:"82px",accentColor:LIME,flexShrink:"0"},
+        {type:"range",min:"0",max:"256",step:"4",value:String(+S.opFeather||0)});
+      const _opFeatherVal=mk("span",{fontSize:"9px",color:LIME,fontWeight:"700",whiteSpace:"nowrap",minWidth:"30px"});
+      const _opFeatherFmt=()=>{ const v=+S.opFeather||0; tx(_opFeatherVal, v>0?`${v}px`:"Auto"); };
+      _opFeatherFmt();
+      _opFeatherRow.title="How far the mask fades into the original at the seam. Higher = softer blend, fewer visible seams. 0 = Auto.";
+      _opFeatherSlider.oninput=()=>{ S.opFeather=+_opFeatherSlider.value||0; _opFeatherFmt(); persist(); };
+      _opFeatherRow.append(_opFeatherLbl,_opFeatherSlider,_opFeatherVal);
+
+      // ── Row 2: size badge + scale + feather ───────────────────────────────
       const _opRow2=mk("div",{
         display:"none",alignItems:"center",justifyContent:"center",gap:"10px",
         padding:"6px 16px 10px",borderTop:`1px solid rgba(255,255,255,.05)`,
       });
-      _opRow2.append(_opDimsLbl,_opScaleRow);
+      _opRow2.append(_opDimsLbl,_opScaleRow,_opFeatherRow);
       _opBar.append(_opRow1,_opRow2);
 
       // ── Outpaint drag handles (canvas-space, inside _opHandleOv) ─────────
@@ -5279,7 +5309,7 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
           mskX.fillRect(_opLeft,_opTop,_maskCanvasW,_maskCanvasH);
           // Feather: gradient bites INTO the original f px — white(new)→black(orig) transition
           // This lets the model see original content at the boundary and blend naturally
-          const f=Math.min(48,Math.floor(Math.min(_maskCanvasW,_maskCanvasH)/6));
+          const f=_opFeatherPx(Math.min(_maskCanvasW,_maskCanvasH),48);
           const L=_opLeft,T=_opTop,R=_opLeft+_maskCanvasW,B=_opTop+_maskCanvasH;
           const fade=(x0,y0,x1,y1,gStartX,gStartY,gEndX,gEndY)=>{
             const g=mskX.createLinearGradient(gStartX,gStartY,gEndX,gEndY);
@@ -5415,7 +5445,7 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
                 L=_savedOpLeft; T=_savedOpTop;
                 R=W-_savedOpRight; B=H-_savedOpBottom;
               }
-              const feather=Math.min(128,Math.min(R-L,B-T)/4);
+              const feather=_opFeatherPx(Math.min(R-L,B-T),128,4);
 
               // Step 1: fill everything white (all new areas will be masked)
               ctx.fillStyle="#ffffff";
