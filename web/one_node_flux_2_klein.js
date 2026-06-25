@@ -193,6 +193,173 @@ function DD(items,selected,onChange){
   };
 }
 
+// ── Cascading folder dropdown ───────────────────────────────────────────────
+// Drop-in replacement for DD (same el/value/set/updateItems API) that renders
+// nested folder submenus built from "/"- or "\"-separated paths — rgthree
+// "Power Lora Loader" style. Used for LoRA pickers, which can live in subfolders.
+function treeDD(items,selected,onChange){
+  let val=selected;
+  const _norm=(s)=>(s||"").replace(/\\/g,"/").toLowerCase();
+  const NS="http://www.w3.org/2000/svg";
+  const folderIco=()=>{
+    const s=document.createElementNS(NS,"svg");
+    s.setAttribute("viewBox","0 0 24 24");s.setAttribute("width","13");s.setAttribute("height","13");
+    s.style.flexShrink="0";s.style.marginTop="-1px";
+    const p=document.createElementNS(NS,"path");
+    p.setAttribute("d","M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z");
+    p.setAttribute("fill","#e2b94a");
+    s.appendChild(p);return s;
+  };
+
+  const wrap=mk("div",{position:"relative",width:"100%",minWidth:"0",overflow:"hidden"});
+  const trig=mk("div",{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:"7px",
+    padding:"0 8px",height:"28px",display:"flex",alignItems:"center",
+    justifyContent:"space-between",cursor:"pointer",boxSizing:"border-box",
+    transition:"border-color .15s",userSelect:"none",overflow:"hidden"});
+  const trigTxt=mk("span",{fontSize:"11px",overflow:"hidden",
+    textOverflow:"ellipsis",whiteSpace:"nowrap",flex:"1",minWidth:"0"});
+  tx(trigTxt,val);trigTxt.style.color=val&&val!=="none"?LIME:C.muted;
+  const arr=mk("span",{fontSize:"8px",color:C.muted,marginLeft:"5px",flexShrink:"0",transition:"transform .18s"});
+  tx(arr,"▾");
+  trig.append(trigTxt,arr);wrap.appendChild(trig);
+
+  // Build a folder tree from the flat path list.
+  const buildTree=(list)=>{
+    const root={folders:new Map(),files:[]};
+    (list||[]).forEach(full=>{
+      if(!full||full==="none") return;
+      const parts=full.replace(/\\/g,"/").split("/").filter(Boolean);
+      const file=parts.pop();
+      let node=root;
+      parts.forEach(seg=>{
+        if(!node.folders.has(seg)) node.folders.set(seg,{folders:new Map(),files:[]});
+        node=node.folders.get(seg);
+      });
+      node.files.push({label:file,full});
+    });
+    return root;
+  };
+  let tree=buildTree(items);
+
+  const panels=[];           // open submenu panels, index === depth
+  let _hoverT=0;
+  const closeFrom=(depth)=>{ while(panels.length>depth){ const p=panels.pop(); if(p&&p.parentNode)p.parentNode.removeChild(p); } };
+  const closeAll=()=>{ clearTimeout(_hoverT); closeFrom(0); arr.style.transform="";trig.style.borderColor=C.border;hideDimmer(); };
+
+  const select=(full)=>{ val=full; tx(trigTxt,full); trigTxt.style.color=full&&full!=="none"?LIME:C.muted; closeAll(); onChange(full); };
+
+  function noneRow(){
+    const sel=!val||val==="none";
+    const r=mk("div",{padding:"7px 10px",fontSize:"11px",cursor:"pointer",fontStyle:"italic",
+      color:sel?LIME:C.muted,background:sel?C.bg2:"transparent",whiteSpace:"nowrap",transition:"background .1s"});
+    tx(r,"— none —");
+    r.onmouseenter=()=>{ clearTimeout(_hoverT); r.style.background=C.bg3; closeFrom(1); };
+    r.onmouseleave=()=>{ r.style.background=sel?C.bg2:"transparent"; };
+    r.onclick=(e)=>{ e.stopPropagation(); select("none"); };
+    return r;
+  }
+  function fileRow(f,depth,showFull){
+    const sel=_norm(f.full)===_norm(val);
+    const r=mk("div",{display:"flex",alignItems:"center",padding:showFull?"7px 12px":"7px 12px 7px 28px",
+      fontSize:"11px",cursor:"pointer",color:sel?LIME:C.text,background:sel?C.bg2:"transparent",
+      whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",transition:"background .1s"});
+    r.setAttribute("data-full",f.full);r.title=f.full;
+    tx(r,showFull?f.full:f.label);
+    r.onmouseenter=()=>{ clearTimeout(_hoverT); r.style.background=C.bg3; closeFrom(depth+1); };
+    r.onmouseleave=()=>{ r.style.background=sel?C.bg2:"transparent"; };
+    r.onclick=(e)=>{ e.stopPropagation(); select(f.full); };
+    return r;
+  }
+  function folderRow(name,childNode,depth){
+    const r=mk("div",{display:"flex",alignItems:"center",gap:"7px",padding:"7px 8px 7px 10px",
+      fontSize:"11px",cursor:"pointer",color:C.text,whiteSpace:"nowrap",transition:"background .1s"});
+    r.appendChild(folderIco());
+    const nm=mk("span",{flex:"1",overflow:"hidden",textOverflow:"ellipsis"});tx(nm,name);
+    const ch=mk("span",{fontSize:"12px",color:C.muted,marginLeft:"6px",flexShrink:"0"});tx(ch,"›");
+    r.append(nm,ch);
+    r.onmouseenter=()=>{ r.style.background=C.bg3; clearTimeout(_hoverT); _hoverT=setTimeout(()=>renderPanel(childNode,depth+1,r.getBoundingClientRect()),70); };
+    r.onmouseleave=()=>{ r.style.background="transparent"; };
+    return r;
+  }
+  function renderNodeRows(node,depth,container){
+    container.innerHTML="";
+    if(depth===0) container.appendChild(noneRow());
+    [...node.folders.keys()].sort((a,b)=>a.localeCompare(b,undefined,{sensitivity:"base"}))
+      .forEach(name=>container.appendChild(folderRow(name,node.folders.get(name),depth)));
+    node.files.slice().sort((a,b)=>a.label.localeCompare(b.label,undefined,{sensitivity:"base"}))
+      .forEach(f=>container.appendChild(fileRow(f,depth,false)));
+  }
+  function renderPanel(node,depth,anchorRect){
+    closeFrom(depth);
+    const panel=mk("div",{position:"fixed",left:"-9999px",top:"-9999px",background:C.bg1,
+      border:`1px solid ${C.borderH}`,borderRadius:"8px",zIndex:String(999999+depth),
+      display:"flex",flexDirection:"column",boxShadow:"0 10px 30px rgba(0,0,0,.9)",
+      overflow:"hidden",minWidth:depth===0?"190px":"168px",maxWidth:"470px"});
+    const listWrap=mk("div",{overflowY:"auto",overflowX:"hidden",maxHeight:"340px"});
+    if(depth===0){
+      const srch=mk("input",{background:C.bg2,border:"none",borderBottom:`1px solid ${C.border}`,
+        padding:"7px 10px",color:C.text,fontSize:"11px",outline:"none",width:"100%",boxSizing:"border-box"},
+        {type:"text",placeholder:"Filter list…"});
+      const renderList=(q)=>{
+        listWrap.innerHTML="";
+        if(q){
+          const all=[]; const collect=(n)=>{ n.files.forEach(f=>all.push(f)); n.folders.forEach(c=>collect(c)); };
+          collect(node);
+          const ql=q.toLowerCase();
+          all.filter(f=>f.full.toLowerCase().includes(ql))
+             .sort((a,b)=>a.full.localeCompare(b.full,undefined,{sensitivity:"base"})).slice(0,300)
+             .forEach(f=>listWrap.appendChild(fileRow(f,0,true)));
+          if(!listWrap.children.length){ const e=mk("div",{padding:"9px 12px",fontSize:"11px",color:C.muted});tx(e,"No matches");listWrap.appendChild(e); }
+        } else renderNodeRows(node,0,listWrap);
+      };
+      srch.oninput=()=>renderList(srch.value.trim());
+      srch.onkeydown=(e)=>{ e.stopPropagation(); if(e.key==="Escape"){closeAll();} else if(e.key==="Enter"){ const f=listWrap.querySelector("[data-full]"); if(f){e.preventDefault();f.click();} } };
+      panel.appendChild(srch);panel.appendChild(listWrap);
+      renderList("");
+      setTimeout(()=>{try{srch.focus();}catch(_){}}, 0);
+    } else {
+      panel.appendChild(listWrap);
+      renderNodeRows(node,depth,listWrap);
+    }
+    document.body.appendChild(panel);
+    panels.push(panel);
+    // Position: depth 0 anchors to the trigger; deeper levels cascade to the right.
+    const pr=panel.getBoundingClientRect();
+    const winW=window.innerWidth,winH=window.innerHeight;
+    let left,top;
+    if(depth===0){
+      const tr=trig.getBoundingClientRect();
+      left=tr.left; top=tr.bottom+4;
+      if(top+pr.height>winH-8) top=Math.max(8,tr.top-pr.height-4);
+      if(left+pr.width>winW-8) left=Math.max(8,winW-pr.width-8);
+    } else {
+      const par=panels[depth-1].getBoundingClientRect();
+      left=par.right-2;
+      if(left+pr.width>winW-8) left=Math.max(8,(anchorRect?anchorRect.left:par.left)-pr.width+2);
+      top=anchorRect?anchorRect.top-1:par.top;
+      if(top+pr.height>winH-8) top=Math.max(8,winH-pr.height-8);
+    }
+    panel.style.left=left+"px";panel.style.top=top+"px";
+    return panel;
+  }
+
+  trig.onclick=(e)=>{ e.stopPropagation(); if(panels.length){ closeAll(); } else { arr.style.transform="rotate(180deg)";trig.style.borderColor=LIME;showDimmer();renderPanel(tree,0,null); } };
+  trig.onmouseenter=()=>{ if(!panels.length) trig.style.background=C.bg2; };
+  trig.onmouseleave=()=>{ if(!panels.length) trig.style.background=C.bg3; };
+  document.addEventListener("mousedown",(e)=>{ if(!panels.length) return; if(trig.contains(e.target)) return; if(panels.some(p=>p&&p.contains(e.target))) return; closeAll(); });
+
+  return{
+    el:wrap,
+    get value(){return val;},
+    set(v){ val=v; tx(trigTxt,v); trigTxt.style.color=v&&v!=="none"?LIME:C.muted; },
+    updateItems(ni){
+      items=ni; tree=buildTree(ni);
+      if(!ni.some(i=>_norm(i)===_norm(val))){ val=ni[0]||val; tx(trigTxt,val); trigTxt.style.color=val&&val!=="none"?LIME:C.muted; onChange(val); }
+      if(panels.length) closeAll();
+    },
+  };
+}
+
 // ── Pill button ───────────────────────────────────────────────────────────────
 function Pill(txt,active,onClick){
   const b=mk("button",{
@@ -822,12 +989,12 @@ app.registerExtension({
 
       // ── Model dropdowns ───────────────────────────────────────────────────
       const mkPathLabel=(txt)=>mk("div",{fontSize:"10px",color:C.muted,marginTop:"-2px",marginBottom:"5px",lineHeight:"1.3",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"},{textContent:txt});
-      const mkModDD=(capTxt,pathTxt,defVal,onCh,autoKeyword=null)=>{
+      const mkModDD=(capTxt,pathTxt,defVal,onCh,autoKeyword=null,useTree=false)=>{
         const wrap=mk("div",{minWidth:"0",overflow:"hidden"});
         wrap.appendChild(cap(capTxt));
         wrap.appendChild(mkPathLabel(pathTxt));
         const row=mk("div",{display:"flex",gap:"4px",alignItems:"center",minWidth:"0",overflow:"hidden"});
-        const dd=DD([defVal||"—"],[defVal||"—"][0],v=>{onCh(v);persist();});
+        const dd=(useTree?treeDD:DD)([defVal||"—"],[defVal||"—"][0],v=>{onCh(v);persist();});
         dd.el.style.flex="1";dd.el.style.minWidth="0";
         dd._items=[defVal||""];
         const origUpdate=dd.updateItems.bind(dd);
@@ -923,7 +1090,7 @@ app.registerExtension({
 
       // Row 2: Faceswap LoRA + Remove BG model
       const modGrid2=mk("div",{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"8px",marginBottom:"16px"});
-      const fsLoraF=mkModDD("Faceswap LoRA","/models/loras",S.fsLora,v=>{S.fsLora=v;persist();});
+      const fsLoraF=mkModDD("Faceswap LoRA","/models/loras",S.fsLora,v=>{S.fsLora=v;persist();},null,true);
       const bgF=mkModDD("Remove BG Model","models/background_removal","none",v=>{S.bgRemovalModel=v==="none"?"":v;persist();});
       api.fetchApi("/flux_klein/bgremoval_models").then(r=>r.json()).then(d=>{
         const models=d.models||[];
@@ -6376,7 +6543,7 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
           _setTrigEditMode(false);
         };
 
-        const ulDD=DD(["none"],"none",v=>{
+        const ulDD=treeDD(["none"],"none",v=>{
           const has=v&&v!=="none";
           S.userLoras[idx].name=has?v:"";
           if(!has){
