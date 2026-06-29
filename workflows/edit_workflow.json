@@ -154,8 +154,8 @@
       "scheduler": "simple",
       "denoise": 1,
       "model": ["FK:169", 0],
-      "positive": ["FK:133", 0],
-      "negative": ["FK:131", 0],
+      "positive": ["FK:233", 0],
+      "negative": ["FK:231", 0],
       "latent_image": ["FK:170", 0]
     },
     "class_type": "KSampler",
