@@ -2,11 +2,14 @@ import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
 const LIME = "#f0ff41";
+// High-contrast palette. Lifted from the original darker greys because users
+// reported labels/borders fading into the dark background (muted/border/dim were
+// too dark). Original values are noted in memory (project_flux_color_palette).
 const C = {
-  lime:LIME, bg0:"#0b0b0b", bg1:"#111111", bg2:"#181818",
-  bg3:"#222222", border:"#2a2a2a", borderH:"#3c3c3c",
-  text:"#dedede", muted:"#565656", dim:"#2e2e2e",
-  warn:"#ffb347", err:"#ff6767",
+  lime:LIME, bg0:"#080808", bg1:"#101010", bg2:"#1c1c1c",
+  bg3:"#2a2a2a", border:"#4c4c4c", borderH:"#5f5f5f",
+  text:"#ffffff", muted:"#b0b0b0", dim:"#4a4a4a",
+  warn:"#ffc266", err:"#ff8080",
 };
 
 const NODE_W = 980;
@@ -938,6 +941,7 @@ app.registerExtension({
           // Outpaint seam feather (px the mask fades into the original). 0 = auto
           // (the previous min(48, edge/6) heuristic), so existing users see no change.
           opFeather:    saved.opFeather!==undefined?saved.opFeather:0,
+          opSnap:       (saved.opSnap===64)?64:8, // outpaint size step: 8 (fine) | 64 (video/LTX)
           previewUrl:   null,
         };
       }
@@ -975,7 +979,7 @@ app.registerExtension({
           inpaintDenoise:S.inpaintDenoise,
           userLoras:S.userLoras, soundEnabled, extLoaders:S.extLoaders,
           downscaleRef:S.downscaleRef, downscaleRefMP:S.downscaleRefMP,
-          layoutMode:S.layoutMode, opFeather:S.opFeather,
+          layoutMode:S.layoutMode, opFeather:S.opFeather, opSnap:S.opSnap,
         });
       };
 
@@ -5173,10 +5177,49 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
       });
       const _opScaleLbl=mk("span",{fontSize:"9px",fontWeight:"600",color:C.muted,whiteSpace:"nowrap"});
       tx(_opScaleLbl,"Scale by longer side");
-      _opScaleRow.append(_opScaleLbl,_opResLonger,_opResResultLbl);
+
+      // Size step (snap): 8px = fine Flux control, 64px = coarse steps that line up with
+      // video models like LTX 2.3 (so a Flux outpaint frame can feed straight into an LTX
+      // outpaint without the dimensions drifting). Applies to the scaled original AND the
+      // Top/Right/Bottom/Left padding, so the whole output lands on the chosen multiple.
+      if(S.opSnap!==64) S.opSnap=8;
+      const _opSnapDivider=mk("span",{width:"1px",height:"16px",background:C.border,flexShrink:"0"});
+      const _opSnapLbl=mk("span",{fontSize:"9px",fontWeight:"600",color:C.muted,whiteSpace:"nowrap"});
+      tx(_opSnapLbl,"Snap");
+      const _opSnapWrap=mk("div",{display:"flex",gap:"3px",flexShrink:"0"});
+      const _opSnapEls={};
+      const _paintSnapPill=(el,on)=>{
+        el.style.background=on?LIME:C.bg2;
+        el.style.color=on?"#111":C.text;
+        el.style.border=`1px solid ${on?LIME:C.border}`;
+        el.style.fontWeight=on?"700":"400";
+      };
+      [8,64].forEach(step=>{
+        const el=mk("button",{
+          borderRadius:"5px",padding:"2px 7px",fontSize:"9px",cursor:"pointer",
+          transition:"all .14s",outline:"none",whiteSpace:"nowrap",
+        });
+        tx(el,`${step}px`);
+        _paintSnapPill(el,S.opSnap===step);
+        el.onclick=()=>{
+          if(S.opSnap===step) return;
+          S.opSnap=step; persist();
+          Object.keys(_opSnapEls).forEach(k=>_paintSnapPill(_opSnapEls[k],+k===step));
+          // Refresh both readouts: the badge (expanded-size mode) and the "→ W×H" preview
+          // (scale mode), so whichever is active reflects the new step immediately.
+          _opApplyBadgeState(); _opResRefresh();
+        };
+        _opSnapEls[step]=el;
+        _opSnapWrap.appendChild(el);
+      });
+      _opSnapLbl.title="Size step. 8px = fine control. 64px = coarse steps that match video models like LTX, so a Flux outpaint can feed straight into an LTX outpaint.";
+
+      _opScaleRow.append(_opScaleLbl,_opResLonger,_opResResultLbl,_opSnapDivider,_opSnapLbl,_opSnapWrap);
 
       const _opApplyBadgeState=()=>{
-        const w=_maskCanvasW+_opLeft+_opRight, h=_maskCanvasH+_opTop+_opBottom;
+        // Snap padding to the chosen size step so the badge shows exactly what Apply produces.
+        const _sn=(S.opSnap===64)?64:8, _snap=v=>Math.max(0,Math.round(v/_sn)*_sn);
+        const w=_maskCanvasW+_snap(_opLeft)+_snap(_opRight), h=_maskCanvasH+_snap(_opTop)+_snap(_opBottom);
         const hasExpand=w!==_maskCanvasW||h!==_maskCanvasH;
         if(_opUseExpandedSize){
           tx(_opDimsLbl,`${w}×${h}`);
@@ -5227,22 +5270,40 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
         return Math.max(1,Math.min(base,Math.floor(edgeMin/2)));
       };
 
+      // Single source of truth for outpaint output size.
+      // Order matters: when "Scale by longer side" is on, the ORIGINAL image is scaled
+      // to the longer side FIRST, then the Top/Right/Bottom/Left padding is added to the
+      // already-scaled image. This matches the LTX 2.3 node (resize → pad), so the same
+      // inputs produce the same output size across both nodes. Without resize, padding is
+      // simply added to the original as-is.
       const _opCalcDims=()=>{
-        const curTop=Math.max(0,Math.round((+_opTopField._inp.value||0)/8)*8);
-        const curRight=Math.max(0,Math.round((+_opRightField._inp.value||0)/8)*8);
-        const curBottom=Math.max(0,Math.round((+_opBottomField._inp.value||0)/8)*8);
-        const curLeft=Math.max(0,Math.round((+_opLeftField._inp.value||0)/8)*8);
-        const expW=_maskCanvasW+curLeft+curRight;
-        const expH=_maskCanvasH+curTop+curBottom;
-        if(_opUseExpandedSize||expW<=0||expH<=0) return {w:expW,h:expH,resized:false};
+        const _sn=(S.opSnap===64)?64:8; // size step (fine 8 vs video/LTX 64)
+        const _snap=v=>Math.max(0,Math.round(v/_sn)*_sn);
+        const curTop=_snap(+_opTopField._inp.value||0);
+        const curRight=_snap(+_opRightField._inp.value||0);
+        const curBottom=_snap(+_opBottomField._inp.value||0);
+        const curLeft=_snap(+_opLeftField._inp.value||0);
+        const ow=_maskCanvasW, oh=_maskCanvasH;
+        if(_opUseExpandedSize||ow<=0||oh<=0){
+          const expW=ow+curLeft+curRight, expH=oh+curTop+curBottom;
+          return {w:expW,h:expH,resized:false};
+        }
         const longer=parseInt(_opResLonger.value)||0;
-        if(!longer) return {w:expW,h:expH,resized:false};
-        const ar=expW/expH;
-        let fw,fh;
-        if(expW>=expH){ fw=longer; fh=Math.round(longer/ar); }
-        else { fh=longer; fw=Math.round(longer*ar); }
-        fw=Math.max(16,Math.round(fw/16)*16); fh=Math.max(16,Math.round(fh/16)*16);
-        return {w:fw,h:fh,resized:true};
+        if(!longer){
+          const expW=ow+curLeft+curRight, expH=oh+curTop+curBottom;
+          return {w:expW,h:expH,resized:false};
+        }
+        // Scale the ORIGINAL to the longer side first (snap to the size step), then add
+        // padding. Snapping the scaled original to 64 is what makes the output line up
+        // with LTX, which also snaps to 64.
+        const ar=ow/oh;
+        let sw,sh;
+        if(ow>=oh){ sw=longer; sh=Math.round(longer/ar); }
+        else { sh=longer; sw=Math.round(longer*ar); }
+        sw=Math.max(_sn,Math.round(sw/_sn)*_sn); sh=Math.max(_sn,Math.round(sh/_sn)*_sn);
+        const fw=sw+curLeft+curRight;
+        const fh=sh+curTop+curBottom;
+        return {w:fw,h:fh,resized:true,scaledOrigW:sw,scaledOrigH:sh};
       };
       const _opResRefresh=()=>{
         const {w,h,resized}=_opCalcDims();
@@ -5840,16 +5901,44 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
         _maskConfirmBtn.disabled=true;tx(_maskConfirmBtn,"Uploading…");
 
         if(_maskMode==="outpaint"){
+          const _sn=(S.opSnap===64)?64:8; // size step (fine 8 vs video/LTX 64)
           // Force-read all fields even if none were blurred
-          _opTop   =Math.max(0,Math.round((+_opTopField._inp.value   ||0)/8)*8);
-          _opRight =Math.max(0,Math.round((+_opRightField._inp.value ||0)/8)*8);
-          _opBottom=Math.max(0,Math.round((+_opBottomField._inp.value||0)/8)*8);
-          _opLeft  =Math.max(0,Math.round((+_opLeftField._inp.value  ||0)/8)*8);
+          _opTop   =Math.max(0,Math.round((+_opTopField._inp.value   ||0)/_sn)*_sn);
+          _opRight =Math.max(0,Math.round((+_opRightField._inp.value ||0)/_sn)*_sn);
+          _opBottom=Math.max(0,Math.round((+_opBottomField._inp.value||0)/_sn)*_sn);
+          _opLeft  =Math.max(0,Math.round((+_opLeftField._inp.value  ||0)/_sn)*_sn);
           if(_opTop===0&&_opRight===0&&_opBottom===0&&_opLeft===0){
             _maskConfirmBtn.disabled=false;tx(_maskConfirmBtn,"Apply Changes");
             _maskShowErr("Set at least one side to expand (Top/Right/Bottom/Left > 0) then click Apply Changes.");
             return;
           }
+
+          // Scale-by-longer-side: resize the ORIGINAL first, then pad — matching the LTX 2.3
+          // node so the same inputs give the same output size. We shrink _maskSourceImgEl (and
+          // _maskCanvasW/H) here, so the padding/mask/feather code below runs on the scaled
+          // image and the old letterbox path stays inactive (_opResW/H left empty).
+          if(!_opUseExpandedSize){
+            const _opLonger=parseInt(_opResLonger.value)||0;
+            if(_opLonger>0){
+              const ow=_maskCanvasW, oh=_maskCanvasH, ar=ow/oh;
+              let sw,sh;
+              if(ow>=oh){ sw=_opLonger; sh=Math.round(_opLonger/ar); }
+              else { sh=_opLonger; sw=Math.round(_opLonger*ar); }
+              sw=Math.max(_sn,Math.round(sw/_sn)*_sn); sh=Math.max(_sn,Math.round(sh/_sn)*_sn);
+              if(sw!==ow||sh!==oh){
+                const sC=document.createElement("canvas"); sC.width=sw; sC.height=sh;
+                sC.getContext("2d").drawImage(_maskSourceImgEl,0,0,sw,sh);
+                const sImg=new Image();
+                await new Promise(r=>{ sImg.onload=r; sImg.src=sC.toDataURL("image/png"); });
+                _maskSourceImgEl=sImg;
+                _maskCanvasW=sw; _maskCanvasH=sh;
+              }
+            }
+            // Original is already scaled — clear the target dims so the letterbox path below
+            // stays inactive. Padding is added to the scaled original as the final size.
+            _opResW.value=""; _opResH.value="";
+          }
+
           const newW=_maskCanvasW+_opLeft+_opRight;
           const newH=_maskCanvasH+_opTop+_opBottom;
 
@@ -9922,6 +10011,10 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
           const seed=S.randomizeSeed?Math.floor(Math.random()*999999999999):S.seed;
           if(S.randomizeSeed){S.seed=seed;seedInp.setVal(seed);_advSeedInp.setVal(seed);_advSeedRefresh();persist();}
           set(WFO.sampler,"seed",seed); _setAdv(WFO.sampler);
+          // Outpaint MUST always run at full denoise — the new area starts as empty padding,
+          // so anything below 1.0 leaves it grey/unfilled. The inpaint "Change strength" slider
+          // (S.inpaintDenoise) and the advanced-UI denoise must never leak into outpaint.
+          set(WFO.sampler,"denoise",1);
           set(WFO.save,"filename_prefix","one-node-flux-2-klein/FK");
           _applyAutoSave(WFO.save);
           _applyBatchRepeat(WFO.sampler,"latent_image"); // latent from InpaintModelConditioning
